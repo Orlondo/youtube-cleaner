@@ -227,5 +227,6 @@ def clean_video(title, description, rules=None):
         "title": new_title,
         "description": new_description,
         "flags": sorted(set(title_flags + description_flags)),
-        "changed": new_title != (title or "") or new_description != (description or ""),
+        # Spacing at the edges (a description of one space, a trailing space) is not worth a review line.
+        "changed": new_title.strip() != (title or "").strip() or new_description.strip() != (description or "").strip(),
     }

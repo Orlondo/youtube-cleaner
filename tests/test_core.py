@@ -230,3 +230,11 @@ class AuthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhitespaceOnlyTest(unittest.TestCase):
+    def test_blank_description_is_not_a_change(self):
+        from youtube_cleaner import rules
+        out = rules.clean_video("Reel Film: Goon", " ")
+        self.assertFalse(out["changed"])
+        self.assertTrue(rules.clean_video("Weathering The Storm", "")["changed"])
