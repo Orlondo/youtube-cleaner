@@ -25,7 +25,9 @@ a{color:var(--acc)}</style></head><body><main>
 <header><h1 id="h">YouTube cleaner</h1><div class="mut" id="s"></div>
 <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="p" id="apply">Apply checked, skip the rest</button>
 <button id="all">Check all</button><button id="none">Check none</button><button id="reload">Next batch</button></div><div id="msg" class="mut" style="margin-top:6px"></div></header>
-<div id="list"></div></main><script>
+<div id="list"></div>
+<section id="done" style="margin-top:28px"><h2 style="font-size:16px;margin:0">Recently changed</h2>
+<div class="mut">Videos this tool already changed on YouTube. Undo puts the original title and description back.</div><div id="dlist"></div></section></main><script>
 const T=new URLSearchParams(location.search).get('t');const H={'X-Token':T,'Content-Type':'application/json'};
 const $=id=>document.getElementById(id);let items=[];
 async function api(p,o){const r=await fetch(p,Object.assign({headers:H},o));const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
@@ -43,6 +45,14 @@ ${it.flags.length?`<div class="flag">Still sounds like a chatbot: ${esc(it.flags
 ${it.error?`<div class="err">Last try failed: ${esc(it.error)}</div>`:''}
 <div class="mut"><a href="https://www.youtube.com/watch?v=${it.id}" target="_blank" rel="noopener">Open on YouTube</a></div></div></div>`;$('list').appendChild(d)});
 await state()}
+async function loadDone(){const j=await api('/api/applied');$('dlist').innerHTML=j.items.length?'':'<p class="mut">Nothing changed yet.</p>';
+j.items.forEach(it=>{const d=document.createElement('div');d.className='card';
+d.innerHTML=`<div class="mut">Title before</div><div class="b">${esc(it.beforeTitle)}</div><div class="mut" style="margin-top:6px">Title now</div><div class="b" style="background:var(--add)">${esc(it.afterTitle)}</div>
+<details><summary class="mut">Description before and now</summary><pre>${esc(it.beforeDescription)||'(empty)'}</pre><pre style="background:var(--add)">${esc(it.afterDescription)||'(empty)'}</pre></details>
+<div style="display:flex;gap:12px;align-items:center;margin-top:6px"><a href="https://www.youtube.com/watch?v=${it.id}" target="_blank" rel="noopener">Open on YouTube</a><button class="u">Undo</button></div>`;
+d.querySelector('.u').onclick=async e=>{if(!confirm('Put the original title and description back on YouTube?'))return;e.target.disabled=true;
+try{const r=await api('/api/undo',{method:'POST',body:JSON.stringify({id:it.id})});$('msg').textContent=r.restored?'Put back.':(r.failed.length?'Could not undo: '+r.failed[0][1]:(r.stopped?'YouTube\'s daily limit is used up. Try again after midnight Pacific time.':'Nothing to undo.'));await loadDone();await state()}catch(x){$('msg').textContent=x.message;e.target.disabled=false}};
+$('dlist').appendChild(d)})}
 function setAll(v){items.forEach((_,i)=>$('c'+i).checked=v)}
 $('all').onclick=()=>setAll(true);$('none').onclick=()=>setAll(false);$('reload').onclick=()=>load().catch(e=>$('msg').textContent=e.message);
 $('apply').onclick=async()=>{const edits={},skip=[];items.forEach((it,i)=>{if($('c'+i).checked)edits[it.id]={title:$('t'+i).value,description:$('d'+i).value};else skip.push(it.id)});
@@ -50,8 +60,8 @@ const n=Object.keys(edits).length;if(n&&!confirm('Change '+n+' live video'+(n==1
 $('apply').disabled=true;$('msg').textContent='Working…';
 try{const r=await api('/api/apply',{method:'POST',body:JSON.stringify({edits,skip})});
 $('msg').textContent='Changed '+r.applied+'.'+(r.failed.length?' '+r.failed.length+' failed: '+r.failed.map(f=>f[0]+' ('+f[1]+')').join('; '):'')+(r.stopped?' YouTube\'s daily limit is used up; '+r.left+' approved video(s) will be changed when you run review again after midnight Pacific time.':'');
-await load().then(()=>{});}catch(e){$('msg').textContent=e.message}finally{$('apply').disabled=false}};
-load().catch(e=>$('msg').textContent=e.message);
+await load();await loadDone();}catch(e){$('msg').textContent=e.message}finally{$('apply').disabled=false}};
+load().catch(e=>$('msg').textContent=e.message);loadDone().catch(()=>{});
 </script></body></html>"""
 
 
@@ -90,11 +100,25 @@ def make_server(yt, st, channel_title, size=20, port=0):
                 proposals = st.proposals()
                 pending = [(v, p) for v, p in proposals.items() if p["status"] in ("pending", "error")][:size]
                 return self._send(200, {"items": [dict(p, id=v) for v, p in pending]})
+            if url.path == "/api/applied":
+                proposals = st.proposals()
+                done = [dict(p, id=v) for v, p in proposals.items() if p["status"] == "applied"]
+                return self._send(200, {"items": list(reversed(done))})
             return self._send(404, {"error": "Not found"})
 
         def do_POST(self):
-            if urllib.parse.urlsplit(self.path).path != "/api/apply" or not self._ok(True):
+            path = urllib.parse.urlsplit(self.path).path
+            if path not in ("/api/apply", "/api/undo") or not self._ok(True):
                 return self._send(403, {"error": "Not allowed"})
+            if path == "/api/undo":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    vid = json.loads(self.rfile.read(min(length, 10_000)).decode() or "{}").get("id")
+                except (ValueError, TypeError, AttributeError):
+                    return self._send(400, {"error": "Could not read that"})
+                if not isinstance(vid, str) or vid not in st.proposals():
+                    return self._send(400, {"error": "Unknown video"})
+                return self._send(200, engine.undo(yt, st, [vid]))
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(min(length, 5_000_000)).decode() or "{}")

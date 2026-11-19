@@ -194,6 +194,34 @@ class ReviewServerTests(unittest.TestCase):
         self.assertEqual(len(nxt), 1)
         self.assertNotEqual(nxt[0]["id"], item["id"])
 
+    def post(self, path, payload, token=True):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Token"] = self.token
+        req = urllib.request.Request(self.base + path, data=json.dumps(payload).encode(), method="POST", headers=headers)
+        return json.loads(urllib.request.urlopen(req).read())
+
+    def test_recently_changed_lists_applied_videos_and_undo_puts_one_back(self):
+        self.assertEqual(json.loads(self.get("/api/applied").read())["items"], [])
+        item = json.loads(self.get("/api/batch").read())["items"][0]
+        original = self.yt.remote[item["id"]]["snippet"]["title"]
+        self.post("/api/apply", {"edits": {item["id"]: {"title": "Chosen Title", "description": item["afterDescription"]}}})
+        done = json.loads(self.get("/api/applied").read())["items"]
+        self.assertEqual([d["id"] for d in done], [item["id"]])
+        self.assertEqual(done[0]["afterTitle"], "Chosen Title")
+        self.assertEqual(self.post("/api/undo", {"id": item["id"]})["restored"], 1)
+        self.assertEqual(self.yt.remote[item["id"]]["snippet"]["title"], original)
+        self.assertEqual(json.loads(self.get("/api/applied").read())["items"], [])
+
+    def test_undo_needs_the_secret_and_a_known_video(self):
+        with self.assertRaises(urllib.error.HTTPError) as c:
+            self.post("/api/undo", {"id": "x"}, token=False)
+        self.assertEqual(c.exception.code, 403)
+        with self.assertRaises(urllib.error.HTTPError) as c:
+            self.post("/api/undo", {"id": "nope"})
+        self.assertEqual(c.exception.code, 400)
+        self.assertEqual(self.yt.updates, [])
+
     def test_apply_without_the_secret_changes_nothing(self):
         req = urllib.request.Request(self.base + "/api/apply", data=b'{"edits":{}}', method="POST")
         with self.assertRaises(urllib.error.HTTPError) as c:
