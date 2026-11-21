@@ -213,6 +213,19 @@ class ReviewServerTests(unittest.TestCase):
         self.assertEqual(self.yt.remote[item["id"]]["snippet"]["title"], original)
         self.assertEqual(json.loads(self.get("/api/applied").read())["items"], [])
 
+    def test_an_undone_video_can_be_reviewed_again(self):
+        item = json.loads(self.get("/api/batch").read())["items"][0]
+        self.post("/api/apply", {"edits": {item["id"]: {"title": "Chosen Title", "description": item["afterDescription"]}}})
+        self.post("/api/undo", {"id": item["id"]})
+        skipped = json.loads(self.get("/api/skipped").read())["items"]
+        self.assertIn(item["id"], [d["id"] for d in skipped])
+        self.post("/api/requeue", {"id": item["id"]})
+        ids = [d["id"] for d in json.loads(self.get("/api/batch").read())["items"]]
+        self.assertIn(item["id"], ids)
+        with self.assertRaises(urllib.error.HTTPError) as c:
+            self.post("/api/requeue", {"id": item["id"]})
+        self.assertEqual(c.exception.code, 400)
+
     def test_undo_needs_the_secret_and_a_known_video(self):
         with self.assertRaises(urllib.error.HTTPError) as c:
             self.post("/api/undo", {"id": "x"}, token=False)
