@@ -30,6 +30,12 @@ def check_text(title, description):
     return ""
 
 
+def _same_text(a, b):
+    """Equal once line endings and spaces at the edges are ignored (YouTube may store text slightly differently)."""
+    norm = lambda t: str(t or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return norm(a) == norm(b)
+
+
 def apply(yt, st, edits=None, skip=(), now=None, budget=store.SAFE_BUDGET):
     """Approves `edits` ({videoId: {"title", "description"}}, the person's final text), skips `skip`, then changes
     every approved video that fits in today's quota. Each original is written to the backup file BEFORE its video
@@ -64,7 +70,7 @@ def apply(yt, st, edits=None, skip=(), now=None, budget=store.SAFE_BUDGET):
             st.add_quota(1, now)
             if not fresh:
                 raise api.ApiError("The video is no longer on the channel")
-            if fresh["snippet"].get("title", "") != p["beforeTitle"] or fresh["snippet"].get("description", "") != p["beforeDescription"]:
+            if not (_same_text(fresh["snippet"].get("title", ""), p["beforeTitle"]) and _same_text(fresh["snippet"].get("description", ""), p["beforeDescription"])):
                 raise api.ApiError("Changed on YouTube since it was pulled. Pull again, then review it")
             snippet = fresh["snippet"]
             st.backup(vid, snippet, p["afterTitle"], p["afterDescription"])   # the original is on disk before anything changes
@@ -120,10 +126,19 @@ def undo(yt, st, video_ids=None, now=None, budget=store.SAFE_BUDGET):
             failed.append((vid, str(error)))
             continue
         st.add_quota(store.UPDATE_COST, now)
+        now_title, now_description = original.get("title", ""), original.get("description", "")
+        try:   # what YouTube actually holds now (it may store the text a little differently from what was sent)
+            again = yt.videos([vid]).get(vid)
+            st.add_quota(1, now)
+            if again:
+                now_title, now_description = again["snippet"].get("title", ""), again["snippet"].get("description", "")
+        except api.ApiError:
+            pass
         if vid in videos:
-            videos[vid]["snippet"]["title"], videos[vid]["snippet"]["description"] = original.get("title", ""), original.get("description", "")
+            videos[vid]["snippet"]["title"], videos[vid]["snippet"]["description"] = now_title, now_description
         if vid in proposals:
             proposals[vid]["status"] = "skipped"   # put back on purpose: not proposed again
+            proposals[vid]["beforeTitle"], proposals[vid]["beforeDescription"] = now_title, now_description
         restored += 1
         st.save_videos(videos)
         st.save_proposals(proposals)

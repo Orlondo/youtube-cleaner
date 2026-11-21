@@ -134,6 +134,23 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.st.proposals()["v0"]["status"], "skipped")
         self.assertEqual(engine.undo(self.yt, self.st, now=NOW)["restored"], 0)   # already original: nothing to do
 
+    def test_a_video_can_be_changed_again_after_undo_even_if_youtube_stores_text_slightly_differently(self):
+        self.start("modern kitchen")
+        engine.apply(self.yt, self.st, {"v0": {"title": "Modern Kitchen", "description": "Hello - world!"}}, now=NOW)
+        real_update = self.yt.update
+
+        def storing_update(vid, snippet, title, description):   # YouTube keeps the text with Windows line endings
+            real_update(vid, snippet, title, description)
+            self.yt.remote[vid]["snippet"]["description"] = description + "\r\n"
+        self.yt.update = storing_update
+        self.assertEqual(engine.undo(self.yt, self.st, now=NOW)["restored"], 1)
+        self.assertEqual(self.st.proposals()["v0"]["beforeDescription"], "Hello — world!!\r\n")   # what YouTube really holds
+        p = self.st.proposals()
+        p["v0"]["status"] = "pending"          # what "Review again" does
+        self.st.save_proposals(p)
+        r = engine.apply(self.yt, self.st, {"v0": {"title": "Modern Kitchen", "description": "Hello - world!"}}, now=NOW)
+        self.assertEqual((r["applied"], r["failed"]), (1, []))
+
     def test_undo_one_video_and_pull_afterwards_does_not_propose_it_again(self):
         self.start("a b", "c d")
         edits = {v: {"title": p["afterTitle"], "description": p["afterDescription"]} for v, p in self.st.proposals().items()}
