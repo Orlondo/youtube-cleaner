@@ -31,7 +31,8 @@ a{color:var(--acc)}</style></head><body><main>
 <section id="skipped" style="margin:28px 0"><h2 style="font-size:16px;margin:0">Left alone or undone</h2>
 <div class="mut">Videos you skipped or put back. Review again brings one back into the list at the top with its cleaned text.</div><div id="slist"></div></section></main><script>
 const T=new URLSearchParams(location.search).get('t');const H={'X-Token':T,'Content-Type':'application/json'};
-const $=id=>document.getElementById(id);let items=[];
+const $=id=>document.getElementById(id);const yt=id=>'https://www.youtube.com/watch?v='+encodeURIComponent(id);
+function say(t,id){const m=$('msg');m.textContent=t;if(id){m.append(' ');const a=document.createElement('a');a.href=yt(id);a.target='_blank';a.rel='noopener';a.textContent='Open the video';m.append(a)}}let items=[];
 async function api(p,o){const r=await fetch(p,Object.assign({headers:H},o));const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function state(){const s=await api('/api/state');$('h').textContent='YouTube cleaner: '+s.channel;
@@ -39,7 +40,7 @@ $('s').textContent=(s.counts.pending||0)+' to review · '+(s.counts.approved||0)
 async function load(){$('msg').textContent='';const j=await api('/api/batch');items=j.items;$('list').innerHTML=items.length?'':'<p>Nothing left to review.</p>';
 items.forEach((it,i)=>{const d=document.createElement('div');d.className='card';
 d.innerHTML=`<div class="row"><input type="checkbox" id="c${i}" checked style="margin-top:6px"><div style="flex:1">
-<div class="mut">Title now</div><div class="b">${esc(it.beforeTitle)}</div><div class="mut" style="margin-top:6px">Title after</div>
+<div class="mut">Title now</div><div class="b"><a href="${yt(it.id)}" target="_blank" rel="noopener">${esc(it.beforeTitle)}</a></div><div class="mut" style="margin-top:6px">Title after</div>
 <input class="a" id="t${i}" value="${esc(it.afterTitle)}">
 <details><summary class="mut">Description now</summary><pre>${esc(it.beforeDescription)||'(empty)'}</pre></details>
 <div class="mut">Description after (you can edit it)</div><textarea class="a" id="d${i}">${esc(it.afterDescription)}</textarea>
@@ -49,17 +50,17 @@ ${it.error?`<div class="err">Last try failed: ${esc(it.error)}</div>`:''}
 await state()}
 async function loadDone(){const j=await api('/api/applied');$('dlist').innerHTML=j.items.length?'':'<p class="mut">Nothing changed yet.</p>';
 j.items.forEach(it=>{const d=document.createElement('div');d.className='card';
-d.innerHTML=`<div class="mut">Title before</div><div class="b">${esc(it.beforeTitle)}</div><div class="mut" style="margin-top:6px">Title now</div><div class="b" style="background:var(--add)">${esc(it.afterTitle)}</div>
+d.innerHTML=`<div class="mut">Title before</div><div class="b">${esc(it.beforeTitle)}</div><div class="mut" style="margin-top:6px">Title now</div><div class="b" style="background:var(--add)"><a href="${yt(it.id)}" target="_blank" rel="noopener">${esc(it.afterTitle)}</a></div>
 <details><summary class="mut">Description before and now</summary><pre>${esc(it.beforeDescription)||'(empty)'}</pre><pre style="background:var(--add)">${esc(it.afterDescription)||'(empty)'}</pre></details>
 <div style="display:flex;gap:12px;align-items:center;margin-top:6px"><a href="https://www.youtube.com/watch?v=${it.id}" target="_blank" rel="noopener">Open on YouTube</a><button class="u">Undo</button></div>`;
 d.querySelector('.u').onclick=async e=>{if(!confirm('Put the original title and description back on YouTube?'))return;e.target.disabled=true;
-try{const r=await api('/api/undo',{method:'POST',body:JSON.stringify({id:it.id})});$('msg').textContent=r.restored?'Put back.':(r.failed.length?'Could not undo: '+r.failed[0][1]:(r.stopped?'YouTube\'s daily limit is used up. Try again after midnight Pacific time.':'Nothing to undo.'));await loadDone();await loadSkipped();await state()}catch(x){$('msg').textContent=x.message;e.target.disabled=false}};
+try{const r=await api('/api/undo',{method:'POST',body:JSON.stringify({id:it.id})});say(r.restored?'Put back.':(r.failed.length?'Could not undo: '+r.failed[0][1]:(r.stopped?'YouTube\'s daily limit is used up. Try again after midnight Pacific time.':'Nothing to undo.')),r.restored?it.id:null);await loadDone();await loadSkipped();await state()}catch(x){$('msg').textContent=x.message;e.target.disabled=false}};
 $('dlist').appendChild(d)})}
 async function loadSkipped(){const j=await api('/api/skipped');$('slist').innerHTML=j.items.length?'':'<p class="mut">Nothing here.</p>';
 j.items.forEach(it=>{const d=document.createElement('div');d.className='card';
-d.innerHTML=`<div class="mut">Title now</div><div class="b">${esc(it.beforeTitle)}</div><div class="mut" style="margin-top:6px">Cleaned title would be</div><div class="b" style="background:var(--add)">${esc(it.afterTitle)}</div>
+d.innerHTML=`<div class="mut">Title now</div><div class="b"><a href="${yt(it.id)}" target="_blank" rel="noopener">${esc(it.beforeTitle)}</a></div><div class="mut" style="margin-top:6px">Cleaned title would be</div><div class="b" style="background:var(--add)">${esc(it.afterTitle)}</div>
 <div style="display:flex;gap:12px;align-items:center;margin-top:6px"><a href="https://www.youtube.com/watch?v=${it.id}" target="_blank" rel="noopener">Open on YouTube</a><button class="r">Review again</button></div>`;
-d.querySelector('.r').onclick=async e=>{e.target.disabled=true;try{await api('/api/requeue',{method:'POST',body:JSON.stringify({id:it.id})});$('msg').textContent='Moved back to the review list.';await load();await loadSkipped()}catch(x){$('msg').textContent=x.message;e.target.disabled=false}};
+d.querySelector('.r').onclick=async e=>{e.target.disabled=true;try{await api('/api/requeue',{method:'POST',body:JSON.stringify({id:it.id})});say('Moved back to the review list.',it.id);await load();await loadSkipped()}catch(x){$('msg').textContent=x.message;e.target.disabled=false}};
 $('slist').appendChild(d)})}
 function setAll(v){items.forEach((_,i)=>$('c'+i).checked=v)}
 $('all').onclick=()=>setAll(true);$('none').onclick=()=>setAll(false);$('reload').onclick=()=>load().catch(e=>$('msg').textContent=e.message);
